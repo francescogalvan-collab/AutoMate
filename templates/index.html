@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>POC Catalogo Servizi</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">POC progetto pratiche digitali</p>
+          <h1>Catalogo servizi dinamico</h1>
+          <p class="subtitle">
+            Seleziona una pratica e visualizza descrizione, documenti richiesti e servizi esterni con il relativo grado di automazione.
+          </p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar card">
+          <label for="serviceSelect">Servizio</label>
+          <select id="serviceSelect">
+            <option value="">Caricamento servizi…</option>
+          </select>
+          <div id="serviceMeta" class="service-meta"></div>
+        </aside>
+
+        <section class="content">
+          <div class="grid">
+            <section class="card section-block">
+              <h2>1. Descrizione del servizio</h2>
+              <div id="serviceDescription" class="empty-state">Seleziona un servizio per vedere i dettagli.</div>
+            </section>
+
+            <section class="card section-block">
+              <h2>2. Documenti necessari per procedere</h2>
+              <div id="documentsPanel" class="empty-state">I documenti richiesti appariranno qui.</div>
+            </section>
+
+            <section class="card section-block section-full">
+              <h2>3. Servizi esterni e grado di automazione</h2>
+              <div id="integrationsPanel" class="empty-state">Le integrazioni appariranno qui.</div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const serviceSelect = document.getElementById('serviceSelect');
+      const serviceMeta = document.getElementById('serviceMeta');
+      const serviceDescription = document.getElementById('serviceDescription');
+      const documentsPanel = document.getElementById('documentsPanel');
+      const integrationsPanel = document.getElementById('integrationsPanel');
+
+      function badgeClass(mode) {
+        const map = {
+          required: 'badge-required',
+          conditional: 'badge-conditional',
+          optional: 'badge-optional',
+          automatic: 'badge-automatic',
+          semi_automatic: 'badge-semi',
+          assisted: 'badge-assisted',
+          none: 'badge-none'
+        };
+        return map[mode] || 'badge-neutral';
+      }
+
+      function labelForMode(mode) {
+        const map = {
+          required: 'Obbligatorio',
+          conditional: 'Condizionale',
+          optional: 'Opzionale',
+          automatic: 'Automatico',
+          semi_automatic: 'Semi-automatico',
+          assisted: 'Assistito',
+          none: 'Manuale'
+        };
+        return map[mode] || mode;
+      }
+
+      async function loadServices() {
+        try {
+          const response = await fetch('/api/services');
+          const services = await response.json();
+
+          serviceSelect.innerHTML = '<option value="">Seleziona un servizio</option>';
+          services.forEach((item) => {
+            const option = document.createElement('option');
+            option.value = item.variant_id;
+            option.textContent = `${item.category_name} · ${item.service_name} — ${item.variant_name}`;
+            option.dataset.category = item.category_name;
+            option.dataset.service = item.service_name;
+            option.dataset.variant = item.variant_name;
+            serviceSelect.appendChild(option);
+          });
+        } catch (error) {
+          serviceSelect.innerHTML = '<option value="">Errore caricamento servizi</option>';
+        }
+      }
+
+      function renderDocuments(documents) {
+        if (!documents.length) {
+          documentsPanel.innerHTML = '<div class="empty-state">Nessun documento associato a questa variante.</div>';
+          return;
+        }
+
+        documentsPanel.innerHTML = `
+          <ul class="list">${documents.map((doc) => `
+            <li class="list-item">
+              <div>
+                <strong>${doc.name}</strong>
+                ${doc.notes ? `<p class="muted">${doc.notes}</p>` : ''}
+              </div>
+              <span class="badge ${badgeClass(doc.mode)}">${labelForMode(doc.mode)}</span>
+            </li>
+          `).join('')}</ul>
+        `;
+      }
+
+      function renderIntegrations(integrations) {
+        if (!integrations.length) {
+          integrationsPanel.innerHTML = '<div class="empty-state">Nessuna integrazione associata a questa variante.</div>';
+          return;
+        }
+
+        integrationsPanel.innerHTML = `
+          <div class="integration-grid">${integrations.map((integration) => `
+            <article class="integration-card">
+              <div class="integration-header">
+                <h3>${integration.portal_name}</h3>
+                <span class="badge ${badgeClass(integration.automation_level)}">${labelForMode(integration.automation_level)}</span>
+              </div>
+              <p><strong>Canale:</strong> ${integration.submission_mode}</p>
+              ${integration.service_scope ? `<p><strong>Ambito:</strong> ${integration.service_scope}</p>` : ''}
+              ${integration.capability_name ? `<p><strong>Profilo:</strong> ${integration.capability_name}</p>` : ''}
+              <ul class="feature-list">
+                <li>Invio pratica: ${integration.supports_submission ? 'Sì' : 'No'}</li>
+                <li>Verifica stato: ${integration.supports_status_check ? 'Sì' : 'No'}</li>
+                <li>Scambio documenti: ${integration.supports_document_exchange ? 'Sì' : 'No'}</li>
+                <li>Supervisione operatore: ${integration.requires_operator_supervision ? 'Sì' : 'No'}</li>
+                <li>Data entry manuale: ${integration.requires_manual_data_entry ? 'Sì' : 'No'}</li>
+              </ul>
+              ${integration.operational_notes ? `<p class="muted">${integration.operational_notes}</p>` : ''}
+            </article>
+          `).join('')}</div>
+        `;
+      }
+
+      async function loadServiceDetail(variantId) {
+        if (!variantId) {
+          serviceMeta.innerHTML = '';
+          serviceDescription.innerHTML = 'Seleziona un servizio per vedere i dettagli.';
+          documentsPanel.innerHTML = 'I documenti richiesti appariranno qui.';
+          integrationsPanel.innerHTML = 'Le integrazioni appariranno qui.';
+          return;
+        }
+
+        const response = await fetch(`/api/services/${variantId}`);
+        const data = await response.json();
+        const { service, documents, integrations } = data;
+
+        serviceMeta.innerHTML = `
+          <p><strong>Categoria:</strong> ${service.category_name}</p>
+          <p><strong>Servizio:</strong> ${service.service_name}</p>
+          <p><strong>Variante:</strong> ${service.variant_name}</p>
+        `;
+
+        serviceDescription.innerHTML = `
+          <div class="description-block">
+            <h3>${service.service_name} — ${service.variant_name}</h3>
+            <p>${service.description || 'Nessuna descrizione disponibile.'}</p>
+          </div>
+        `;
+
+        renderDocuments(documents);
+        renderIntegrations(integrations);
+      }
+
+      serviceSelect.addEventListener('change', (event) => loadServiceDetail(event.target.value));
+      loadServices();
+    </script>
+  </body>
+</html>
