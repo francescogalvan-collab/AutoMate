@@ -4,8 +4,7 @@ from typing import Any
 
 from flask import Flask, jsonify, render_template
 import psycopg2
-from psycopg.rows import dict_row
-
+import psycopg2.extras
 
 app = Flask(__name__)
 
@@ -14,15 +13,14 @@ def get_database_url() -> str:
     database_url = os.getenv("postgresql://automate_postgres_user:WOERDl99wyAm9PvPRIbzHOxBRitbvXLe@dpg-d7hc913bc2fs73detoeg-a.frankfurt-postgres.render.com/automate_postgres")
     if not database_url:
         raise RuntimeError(
-            "DATABASE_URL non impostata. Esempio: postgresql://user:password@localhost:5432/pratiche_db"
+            "DATABASE_URL non impostata. Esempio: postgresql://user:password@host:5432/dbname"
         )
     return database_url
 
 
 @contextmanager
 def get_conn():
-    conn = psycopg2.connect(get_database_url(), row_factory=dict_row)
-    cursor = conn.cursor()
+    conn = psycopg2.connect(get_database_url())
     try:
         yield conn
     finally:
@@ -45,15 +43,24 @@ def list_services():
             s.name as service_name,
             sv.code as variant_code,
             sv.name as variant_name,
-            coalesce(nullif(trim(sv.description), ''), nullif(trim(s.long_description), ''), nullif(trim(s.short_description), ''), s.name) as display_description
+            coalesce(
+                nullif(trim(sv.description), ''),
+                nullif(trim(s.long_description), ''),
+                nullif(trim(s.short_description), ''),
+                s.name
+            ) as display_description
         from catalog.service_variants sv
         join catalog.services s on s.id = sv.service_id
         join catalog.service_categories sc on sc.id = s.category_id
-        where s.status = 'active' and sv.status = 'active' and s.is_public = true
+        where s.status = 'active'
+          and sv.status = 'active'
+          and s.is_public = true
         order by sc.sort_order, sc.name, s.name, sv.name
     """
     with get_conn() as conn:
-        rows = conn.execute(query).fetchall()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
     return jsonify(rows)
 
 
@@ -69,7 +76,12 @@ def service_detail(variant_id: str):
             s.name as service_name,
             sv.code as variant_code,
             sv.name as variant_name,
-            coalesce(nullif(trim(sv.description), ''), nullif(trim(s.long_description), ''), nullif(trim(s.short_description), ''), s.name) as description
+            coalesce(
+                nullif(trim(sv.description), ''),
+                nullif(trim(s.long_description), ''),
+                nullif(trim(s.short_description), ''),
+                s.name
+            ) as description
         from catalog.service_variants sv
         join catalog.services s on s.id = sv.service_id
         join catalog.service_categories sc on sc.id = s.category_id
@@ -115,11 +127,18 @@ def service_detail(variant_id: str):
     """
 
     with get_conn() as conn:
-        service = conn.execute(service_query, (variant_id,)).fetchone()
-        if not service:
-            return jsonify({"error": "Servizio non trovato"}), 404
-        documents = conn.execute(documents_query, (variant_id,)).fetchall()
-        integrations = conn.execute(integrations_query, (variant_id,)).fetchall()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(service_query, (variant_id,))
+            service = cur.fetchone()
+
+            if not service:
+                return jsonify({"error": "Servizio non trovato"}), 404
+
+            cur.execute(documents_query, (variant_id,))
+            documents = cur.fetchall()
+
+            cur.execute(integrations_query, (variant_id,))
+            integrations = cur.fetchall()
 
     payload: dict[str, Any] = {
         "service": service,
