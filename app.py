@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 
 def get_database_url() -> str:
-    database_url = os.getenv("postgresql://automate_postgres_user:WOERDl99wyAm9PvPRIbzHOxBRitbvXLe@dpg-d7hc913bc2fs73detoeg-a/automate_postgres")
+    database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError(
             "DATABASE_URL non impostata. Esempio: postgresql://user:password@host:5432/dbname"
