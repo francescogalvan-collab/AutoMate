@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from flask import Flask, jsonify, render_template
-import psycopg
+import psycopg2
 from psycopg.rows import dict_row
 
 
