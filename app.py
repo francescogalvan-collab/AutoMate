@@ -4,7 +4,7 @@ from typing import Any
 
 from flask import Flask, jsonify, render_template
 import psycopg2
-from psycopg2.rows import dict_row
+from psycopg.rows import dict_row
 
 
 app = Flask(__name__)
@@ -21,7 +21,8 @@ def get_database_url() -> str:
 
 @contextmanager
 def get_conn():
-    conn = psycopg.connect(get_database_url(), row_factory=dict_row)
+    conn = psycopg2.connect(get_database_url(), row_factory=dict_row)
+    cursor = conn.cursor()
     try:
         yield conn
     finally:
