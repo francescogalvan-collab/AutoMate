@@ -1,24 +1,18 @@
-# POC Service Browser v3
+# AutoMate POC v4
 
-POC Flask collegato a PostgreSQL con:
-- elenco servizi dinamico
-- documenti richiesti
-- canali di integrazione e grado di automazione
-- upload singolo documento
-- OCR simulato con anteprima dati estratti
+Versione con:
+- login Google
+- consenso privacy prima di salvare dati utente
+- creazione/ripresa della prima pratica in bozza
+- upload documenti associati all'utente autenticato
+- OCR simulato con preview campi estratti
 
-## Avvio locale
+## Variabili ambiente richieste
+DATABASE_URL=...
+SECRET_KEY=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
 
-```bash
-pip install -r requirements.txt
-export DATABASE_URL="postgresql://user:password@host:5432/database"
-python app.py
-```
-
-## Deploy su Render
-- Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn app:app`
-- Environment variable: `DATABASE_URL` con Internal DB URL
-
-## Note
-Questa versione salva i file nella cartella `uploads/` del servizio. Per ambienti persistenti è consigliato usare object storage.
+## Render
+Build command: pip install -r requirements.txt
+Start command: gunicorn app:app

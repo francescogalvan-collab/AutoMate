@@ -1,3 +1,5 @@
 Flask
-psycopg2-binary
 gunicorn
+psycopg2-binary
+Authlib
+requests
