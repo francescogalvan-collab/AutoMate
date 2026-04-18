@@ -1,10 +1,14 @@
 import os
+import uuid
 from contextlib import contextmanager
 from typing import Any
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import psycopg2
 import psycopg2.extras
+
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
 
@@ -12,9 +16,7 @@ app = Flask(__name__)
 def get_database_url() -> str:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL non impostata. Esempio: postgresql://user:password@host:5432/dbname"
-        )
+        raise RuntimeError("DATABASE_URL non impostata")
     return database_url
 
 
@@ -32,30 +34,21 @@ def index():
     return render_template("index.html")
 
 
+# =========================
+# SERVICES LIST
+# =========================
 @app.get("/api/services")
 def list_services():
     query = """
         select
             sv.id as variant_id,
-            s.id as service_id,
-            sc.name as category_name,
-            s.code as service_code,
             s.name as service_name,
-            sv.code as variant_code,
             sv.name as variant_name,
-            coalesce(
-                nullif(trim(sv.description), ''),
-                nullif(trim(s.long_description), ''),
-                nullif(trim(s.short_description), ''),
-                s.name
-            ) as display_description
+            coalesce(sv.description, s.short_description) as description
         from catalog.service_variants sv
         join catalog.services s on s.id = sv.service_id
-        join catalog.service_categories sc on sc.id = s.category_id
-        where s.status = 'active'
-          and sv.status = 'active'
-          and s.is_public = true
-        order by sc.sort_order, sc.name, s.name, sv.name
+        where s.status = 'active' and sv.status = 'active'
+        order by s.name, sv.name
     """
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -64,89 +57,69 @@ def list_services():
     return jsonify(rows)
 
 
+# =========================
+# SERVICE DETAIL
+# =========================
 @app.get("/api/services/<variant_id>")
 def service_detail(variant_id: str):
-    service_query = """
-        select
-            sv.id as variant_id,
-            s.id as service_id,
-            sc.code as category_code,
-            sc.name as category_name,
-            s.code as service_code,
-            s.name as service_name,
-            sv.code as variant_code,
-            sv.name as variant_name,
-            coalesce(
-                nullif(trim(sv.description), ''),
-                nullif(trim(s.long_description), ''),
-                nullif(trim(s.short_description), ''),
-                s.name
-            ) as description
-        from catalog.service_variants sv
-        join catalog.services s on s.id = sv.service_id
-        join catalog.service_categories sc on sc.id = s.category_id
-        where sv.id = %s
-    """
-
-    documents_query = """
-        select
-            dt.code,
-            dt.name,
-            vr.mode,
-            vr.notes,
-            vr.sort_order,
-            vr.condition_expression
-        from catalog.variant_requirements vr
-        join catalog.document_types dt on dt.id = vr.document_type_id
-        where vr.variant_id = %s
-          and vr.requirement_type = 'document'
-        order by vr.sort_order, dt.name
-    """
-
-    integrations_query = """
-        select
-            p.code as portal_code,
-            p.name as portal_name,
-            p.service_scope,
-            sip.submission_mode,
-            sip.automation_level,
-            sip.supports_submission,
-            sip.supports_status_check,
-            sip.supports_document_exchange,
-            sip.requires_operator_supervision,
-            sip.requires_manual_data_entry,
-            sip.operational_notes,
-            sip.sla_notes,
-            ic.name as capability_name,
-            ic.description as capability_description
-        from integration.service_integration_profiles sip
-        join integration.portals p on p.id = sip.portal_id
-        left join integration.integration_capabilities ic on ic.id = sip.capability_id
-        where sip.variant_id = %s
-        order by sip.is_primary desc, p.name
-    """
-
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(service_query, (variant_id,))
+
+            cur.execute("""
+                select sv.id, sv.name, sv.description
+                from catalog.service_variants sv
+                where sv.id = %s
+            """, (variant_id,))
             service = cur.fetchone()
 
-            if not service:
-                return jsonify({"error": "Servizio non trovato"}), 404
-
-            cur.execute(documents_query, (variant_id,))
+            cur.execute("""
+                select dt.code, dt.name
+                from catalog.variant_requirements vr
+                join catalog.document_types dt on dt.id = vr.document_type_id
+                where vr.variant_id = %s
+            """, (variant_id,))
             documents = cur.fetchall()
 
-            cur.execute(integrations_query, (variant_id,))
-            integrations = cur.fetchall()
-
-    payload: dict[str, Any] = {
+    return jsonify({
         "service": service,
-        "documents": documents,
-        "integrations": integrations,
-    }
-    return jsonify(payload)
+        "documents": documents
+    })
 
 
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+# =========================
+# UPLOAD DOCUMENT
+# =========================
+@app.post("/api/upload")
+def upload():
+    file = request.files.get("file")
+    document_type = request.form.get("document_type")
+
+    if not file:
+        return {"error": "file mancante"}, 400
+
+    filename = f"{uuid.uuid4()}_{file.filename}"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                insert into docs.documents (
+                    id, file_name, document_type, status, created_at
+                )
+                values (gen_random_uuid(), %s, %s, 'pending', now())
+            """, (filename, document_type))
+            conn.commit()
+
+    return {"status": "ok", "file": filename}
+
+
+# =========================
+# DEBUG
+# =========================
+@app.get("/api/health/db")
+def health():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select now()")
+            return {"status": "ok"}
