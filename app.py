@@ -4,7 +4,7 @@ from typing import Any
 
 from flask import Flask, jsonify, render_template
 import psycopg2
-from psycopg.rows import dict_row
+from psycopg2.rows import dict_row
 
 
 app = Flask(__name__)
