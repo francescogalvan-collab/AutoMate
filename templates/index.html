@@ -1,234 +1,326 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AutoMate — POC servizi</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoMate - POC v4</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main class="page-shell">
-    <section class="hero">
-      <p class="eyebrow">POC operativo</p>
-      <h1>Seleziona un servizio e avvia il caricamento documenti</h1>
-      <p class="hero-copy">Una vista dinamica dei servizi disponibili, dei documenti richiesti e dei canali di integrazione. Include upload singolo e anteprima OCR simulata.</p>
-    </section>
-
-    <section class="card">
-      <div class="field-block">
-        <label for="services">Servizio</label>
-        <select id="services">
-          <option value="">Caricamento servizi...</option>
-        </select>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">POC v4</div>
+        <h1>Catalogo pratiche con login Google, privacy e prima pratica</h1>
+        <p class="hero-copy">Scegli una pratica, autorizza l’accesso, carica i documenti e genera la prima pratica collegata all’utente.</p>
       </div>
-
-      <div id="serviceMeta" class="service-meta hidden">
-        <div class="meta-section">
-          <h2>Descrizione del servizio</h2>
-          <p id="serviceDescription"></p>
+      <div class="auth-panel">
+        <div id="loggedOutBox">
+          <label class="privacy-box">
+            <input type="checkbox" id="privacyConsent">
+            <span>Ho letto e accetto l’informativa privacy per il trattamento dei miei dati e dei documenti caricati.</span>
+          </label>
+          <button class="primary-btn" id="googleLoginBtn">Continua con Google</button>
         </div>
-
-        <div class="meta-section">
-          <h2>Documenti necessari</h2>
-          <div id="documents" class="document-list"></div>
-        </div>
-
-        <div class="meta-section">
-          <h2>Interfacce e grado di automazione</h2>
-          <div id="integrations" class="integration-list"></div>
-        </div>
-
-        <div class="meta-section">
-          <h2>Documenti caricati e dati OCR simulati</h2>
-          <div id="uploads" class="upload-list empty-state">Nessun documento caricato per questo servizio.</div>
+        <div id="loggedInBox" class="hidden">
+          <div class="user-chip">
+            <div class="user-avatar" id="userAvatar"></div>
+            <div>
+              <div class="user-name" id="userName"></div>
+              <div class="user-email" id="userEmail"></div>
+            </div>
+          </div>
+          <button class="secondary-btn" id="logoutBtn">Esci</button>
         </div>
       </div>
-    </section>
-  </main>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h2>1. Seleziona servizio</h2>
+        <select id="services"></select>
+        <div class="service-meta">
+          <div>
+            <span class="meta-label">Categoria</span>
+            <div id="serviceCategory" class="meta-value">—</div>
+          </div>
+          <div>
+            <span class="meta-label">Variante</span>
+            <div id="serviceVariant" class="meta-value">—</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <section class="card">
+          <h2>2. Descrizione del servizio</h2>
+          <p id="serviceDescription" class="description">Seleziona un servizio per vedere i dettagli.</p>
+        </section>
+
+        <section class="card">
+          <h2>3. Servizi esterni e grado di automazione</h2>
+          <div id="integrations" class="stack-list empty-state">Seleziona un servizio per vedere le integrazioni.</div>
+        </section>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>4. Documenti necessari</h2>
+          <button class="secondary-btn" id="createPracticeBtn" disabled>Crea / recupera pratica bozza</button>
+        </div>
+        <div id="documents" class="stack-list empty-state">Seleziona un servizio per vedere i documenti richiesti.</div>
+      </section>
+
+      <section class="card">
+        <h2>5. Upload recenti e preview OCR</h2>
+        <div id="uploadsList" class="stack-list empty-state">Accedi e carica un documento per vedere lo storico.</div>
+      </section>
+    </main>
+  </div>
 
 <script>
-const servicesSelect = document.getElementById('services');
-const serviceMeta = document.getElementById('serviceMeta');
-const serviceDescription = document.getElementById('serviceDescription');
-const documentsContainer = document.getElementById('documents');
-const integrationsContainer = document.getElementById('integrations');
-const uploadsContainer = document.getElementById('uploads');
+const state = {
+  selectedVariantId: null,
+  currentPracticeId: null,
+  session: null
+};
 
-let currentVariantId = null;
-let cachedDetail = null;
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+async function fetchJSON(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    let message = `Errore ${res.status}`;
+    try {
+      const payload = await res.json();
+      if (payload.error) message = payload.error;
+      if (payload.message) message = payload.message;
+    } catch (_) {}
+    throw new Error(message);
+  }
+  return res.json();
 }
 
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Errore HTTP ${response.status}`);
+async function loadSession() {
+  state.session = await fetchJSON('/api/session');
+  const loggedIn = state.session.is_authenticated;
+  document.getElementById('loggedOutBox').classList.toggle('hidden', loggedIn);
+  document.getElementById('loggedInBox').classList.toggle('hidden', !loggedIn);
+
+  if (loggedIn) {
+    document.getElementById('userName').textContent = state.session.user_name || 'Utente';
+    document.getElementById('userEmail').textContent = state.session.user_email || '';
+    document.getElementById('userAvatar').textContent = (state.session.user_name || state.session.user_email || 'U').trim().slice(0, 1).toUpperCase();
+    await loadUploads();
+  } else {
+    document.getElementById('uploadsList').innerHTML = '<div class="empty-state">Accedi e carica un documento per vedere lo storico.</div>';
   }
-  return response.json();
+  syncCreatePracticeButton();
+}
+
+function syncCreatePracticeButton() {
+  const btn = document.getElementById('createPracticeBtn');
+  btn.disabled = !(state.session?.is_authenticated && state.selectedVariantId);
+}
+
+async function startGoogleLogin() {
+  const privacyAccepted = document.getElementById('privacyConsent').checked;
+  if (!privacyAccepted) {
+    alert('Per procedere devi accettare l’informativa privacy.');
+    return;
+  }
+  const res = await fetch('/auth/google/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ privacy_accepted: true })
+  });
+  if (res.redirected) {
+    window.location.href = res.url;
+    return;
+  }
+  const text = await res.text();
+  document.open();
+  document.write(text);
+  document.close();
+}
+
+async function logout() {
+  await fetchJSON('/auth/logout', { method: 'POST' });
+  location.reload();
 }
 
 async function loadServices() {
-  try {
-    const services = await fetchJson('/api/services');
-    servicesSelect.innerHTML = '<option value="">Seleziona un servizio</option>';
-    services.forEach(service => {
-      const option = document.createElement('option');
-      option.value = service.variant_id;
-      option.textContent = `${service.category_name} — ${service.variant_name}`;
-      servicesSelect.appendChild(option);
-    });
-  } catch (error) {
-    servicesSelect.innerHTML = '<option value="">Errore caricamento servizi</option>';
-    console.error(error);
+  const services = await fetchJSON('/api/services');
+  const select = document.getElementById('services');
+  select.innerHTML = '';
+  services.forEach((item, idx) => {
+    const option = document.createElement('option');
+    option.value = item.variant_id;
+    option.textContent = `${item.category_name} · ${item.service_name} · ${item.variant_name}`;
+    if (idx === 0) state.selectedVariantId = item.variant_id;
+    select.appendChild(option);
+  });
+  if (services.length > 0) {
+    await loadServiceDetail(select.value);
+  } else {
+    select.innerHTML = '<option>Nessun servizio disponibile</option>';
   }
-}
-
-function renderIntegrations(integrations) {
-  if (!integrations?.length) {
-    integrationsContainer.innerHTML = '<div class="empty-state">Nessuna integrazione censita per questa variante.</div>';
-    return;
-  }
-  integrationsContainer.innerHTML = integrations.map(item => `
-    <article class="integration-item">
-      <div>
-        <div class="integration-title">${escapeHtml(item.portal_name)}</div>
-        <div class="integration-scope">${escapeHtml(item.service_scope || 'Canale operativo')}</div>
-      </div>
-      <div class="integration-badges">
-        <span class="badge badge-automation">${escapeHtml(item.automation_level)}</span>
-        <span class="badge badge-mode">${escapeHtml(item.submission_mode)}</span>
-      </div>
-    </article>
-  `).join('');
-}
-
-function renderUploads(uploads) {
-  if (!uploads?.length) {
-    uploadsContainer.className = 'upload-list empty-state';
-    uploadsContainer.innerHTML = 'Nessun documento caricato per questo servizio.';
-    return;
-  }
-  uploadsContainer.className = 'upload-list';
-  uploadsContainer.innerHTML = uploads.map(upload => {
-    const ocr = upload.ocr_payload || {};
-    const details = Object.entries(ocr)
-      .filter(([key]) => !['document_type', 'confidence'].includes(key))
-      .map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(Array.isArray(value) ? value.join(', ') : value)}</li>`)
-      .join('');
-
-    return `
-      <article class="upload-item">
-        <div class="upload-header">
-          <div>
-            <div class="upload-title">${escapeHtml(upload.document_name || upload.document_code)}</div>
-            <div class="upload-subtitle">${escapeHtml(upload.original_filename)}</div>
-          </div>
-          <span class="badge badge-success">${escapeHtml(upload.ocr_status)}</span>
-        </div>
-        <div class="ocr-panel">
-          <div class="ocr-title">Anteprima OCR simulata</div>
-          <ul>${details || '<li>Nessun dato simulato disponibile.</li>'}</ul>
-        </div>
-      </article>
-    `;
-  }).join('');
-}
-
-function renderDocuments(documents) {
-  if (!documents?.length) {
-    documentsContainer.innerHTML = '<div class="empty-state">Nessun requisito documentale disponibile.</div>';
-    return;
-  }
-
-  documentsContainer.innerHTML = documents.map(doc => `
-    <article class="document-item" data-document-code="${escapeHtml(doc.code)}">
-      <div class="document-main">
-        <div class="document-title-row">
-          <div class="document-title">${escapeHtml(doc.name)}</div>
-          <span class="badge badge-neutral">${escapeHtml(doc.mode)}</span>
-        </div>
-        <div class="document-note">${escapeHtml(doc.notes || 'Documento richiesto dal flusso della pratica.')}</div>
-        <div class="upload-actions">
-          <label class="upload-button">
-            Carica file
-            <input type="file" data-document-code="${escapeHtml(doc.code)}" data-document-name="${escapeHtml(doc.name)}" />
-          </label>
-          <span class="inline-status" id="status-${escapeHtml(doc.code)}">Non caricato</span>
-        </div>
-      </div>
-    </article>
-  `).join('');
-
-  documentsContainer.querySelectorAll('input[type="file"]').forEach(input => {
-    input.addEventListener('change', handleUpload);
+  select.addEventListener('change', async (e) => {
+    state.selectedVariantId = e.target.value;
+    state.currentPracticeId = null;
+    await loadServiceDetail(e.target.value);
   });
 }
 
 async function loadServiceDetail(variantId) {
-  if (!variantId) {
-    serviceMeta.classList.add('hidden');
-    currentVariantId = null;
-    cachedDetail = null;
+  state.selectedVariantId = variantId;
+  const payload = await fetchJSON(`/api/services/${variantId}`);
+  document.getElementById('serviceDescription').textContent = payload.service.description || 'Nessuna descrizione disponibile.';
+  document.getElementById('serviceCategory').textContent = payload.service.category_name || '—';
+  document.getElementById('serviceVariant').textContent = payload.service.variant_name || '—';
+
+  const docsContainer = document.getElementById('documents');
+  docsContainer.innerHTML = '';
+  if (!payload.documents.length) {
+    docsContainer.innerHTML = '<div class="empty-state">Nessun documento richiesto.</div>';
+  } else {
+    payload.documents.forEach(doc => {
+      const row = document.createElement('div');
+      row.className = 'doc-item';
+      row.innerHTML = `
+        <div>
+          <div class="doc-title">${doc.name}</div>
+          <div class="doc-note">${doc.notes || 'Documento richiesto per la pratica.'}</div>
+        </div>
+        <div class="doc-actions">
+          <span class="badge ${doc.mode === 'required' ? 'badge-danger' : 'badge-neutral'}">${doc.mode}</span>
+          <label class="upload-btn">
+            <input type="file" data-document-code="${doc.code}" class="file-input">
+            Carica file
+          </label>
+        </div>
+      `;
+      docsContainer.appendChild(row);
+    });
+    docsContainer.querySelectorAll('.file-input').forEach(input => {
+      input.addEventListener('change', handleFileUpload);
+    });
+  }
+
+  const integrations = document.getElementById('integrations');
+  integrations.innerHTML = '';
+  if (!payload.integrations.length) {
+    integrations.innerHTML = '<div class="empty-state">Nessuna integrazione configurata.</div>';
+  } else {
+    payload.integrations.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'integration-item';
+      row.innerHTML = `
+        <div>
+          <div class="integration-title">${item.portal_name}</div>
+          <div class="integration-note">${item.operational_notes || item.capability_description || 'Nessuna nota operativa disponibile.'}</div>
+        </div>
+        <div class="integration-tags">
+          <span class="badge badge-primary">${item.automation_level}</span>
+          <span class="badge badge-neutral">${item.submission_mode}</span>
+        </div>
+      `;
+      integrations.appendChild(row);
+    });
+  }
+  syncCreatePracticeButton();
+}
+
+async function ensurePractice() {
+  if (!state.session?.is_authenticated) {
+    alert('Accedi con Google prima di creare una pratica.');
+    return null;
+  }
+  if (state.currentPracticeId) return state.currentPracticeId;
+  const payload = await fetchJSON('/api/practices', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ variant_id: state.selectedVariantId })
+  });
+  state.currentPracticeId = payload.practice_id;
+  return state.currentPracticeId;
+}
+
+async function handleFileUpload(event) {
+  if (!state.session?.is_authenticated) {
+    alert('Accedi con Google prima di caricare documenti.');
+    event.target.value = '';
     return;
   }
 
-  try {
-    const detail = await fetchJson(`/api/services/${variantId}`);
-    currentVariantId = variantId;
-    cachedDetail = detail;
-    serviceMeta.classList.remove('hidden');
-    serviceDescription.textContent = detail.service.description;
-    renderDocuments(detail.documents);
-    renderIntegrations(detail.integrations);
-    renderUploads(detail.uploads);
-  } catch (error) {
-    console.error(error);
-    serviceDescription.textContent = 'Errore nel caricamento del dettaglio servizio.';
-  }
-}
+  const file = event.target.files[0];
+  if (!file) return;
 
-async function handleUpload(event) {
-  const input = event.target;
-  const file = input.files?.[0];
-  if (!file || !currentVariantId) return;
+  await ensurePractice();
 
-  const documentCode = input.dataset.documentCode;
-  const documentName = input.dataset.documentName;
-  const statusNode = document.getElementById(`status-${documentCode}`);
-  statusNode.textContent = 'Caricamento...';
-  statusNode.className = 'inline-status is-loading';
-
+  const documentTypeCode = event.target.dataset.documentCode;
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('variant_id', currentVariantId);
-  formData.append('document_code', documentCode);
-  formData.append('document_name', documentName);
+  formData.append('document_type_code', documentTypeCode);
+  formData.append('variant_id', state.selectedVariantId);
+
+  const parent = event.target.closest('.doc-item');
+  const status = document.createElement('div');
+  status.className = 'ocr-preview';
+  status.textContent = 'Upload in corso...';
+  parent.appendChild(status);
 
   try {
-    await fetchJson('/api/upload', {
+    const payload = await fetchJSON('/api/upload', {
       method: 'POST',
-      body: formData,
+      body: formData
     });
-    statusNode.textContent = 'Caricato';
-    statusNode.className = 'inline-status is-success';
-    await loadServiceDetail(currentVariantId);
+
+    status.innerHTML = `
+      <div class="ocr-title">OCR simulato completato</div>
+      <pre>${JSON.stringify(payload.ocr_preview.fields, null, 2)}</pre>
+    `;
+    await loadUploads();
   } catch (error) {
-    console.error(error);
-    statusNode.textContent = 'Errore upload';
-    statusNode.className = 'inline-status is-error';
+    status.textContent = error.message;
+    status.classList.add('ocr-error');
   }
 }
 
-servicesSelect.addEventListener('change', (event) => loadServiceDetail(event.target.value));
-loadServices();
+async function loadUploads() {
+  const uploads = await fetchJSON('/api/my/uploads');
+  const container = document.getElementById('uploadsList');
+  container.innerHTML = '';
+  if (!uploads.length) {
+    container.innerHTML = '<div class="empty-state">Nessun documento caricato.</div>';
+    return;
+  }
+
+  uploads.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'upload-item';
+    row.innerHTML = `
+      <div>
+        <div class="upload-title">${item.filename}</div>
+        <div class="upload-note">${item.document_type_code} · ${new Date(item.created_at).toLocaleString('it-IT')}</div>
+      </div>
+      <div class="upload-preview">
+        <span class="badge badge-success">${item.ocr_status}</span>
+        <pre>${JSON.stringify((item.ocr_preview || {}).fields || {}, null, 2)}</pre>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('googleLoginBtn').addEventListener('click', startGoogleLogin);
+document.getElementById('logoutBtn').addEventListener('click', logout);
+document.getElementById('createPracticeBtn').addEventListener('click', async () => {
+  const practiceId = await ensurePractice();
+  if (practiceId) {
+    alert(`Pratica bozza pronta: ${practiceId}`);
+  }
+});
+
+loadSession().then(loadServices);
 </script>
 </body>
 </html>
