@@ -1,73 +1,234 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="it">
 <head>
-    <title>POC Pratiche</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoMate — POC servizi</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  <main class="page-shell">
+    <section class="hero">
+      <p class="eyebrow">POC operativo</p>
+      <h1>Seleziona un servizio e avvia il caricamento documenti</h1>
+      <p class="hero-copy">Una vista dinamica dei servizi disponibili, dei documenti richiesti e dei canali di integrazione. Include upload singolo e anteprima OCR simulata.</p>
+    </section>
 
-<div class="container">
+    <section class="card">
+      <div class="field-block">
+        <label for="services">Servizio</label>
+        <select id="services">
+          <option value="">Caricamento servizi...</option>
+        </select>
+      </div>
 
-<h2>Seleziona servizio</h2>
-<select id="services"></select>
+      <div id="serviceMeta" class="service-meta hidden">
+        <div class="meta-section">
+          <h2>Descrizione del servizio</h2>
+          <p id="serviceDescription"></p>
+        </div>
 
-<h3>Documenti richiesti</h3>
-<div id="documents"></div>
+        <div class="meta-section">
+          <h2>Documenti necessari</h2>
+          <div id="documents" class="document-list"></div>
+        </div>
 
-</div>
+        <div class="meta-section">
+          <h2>Interfacce e grado di automazione</h2>
+          <div id="integrations" class="integration-list"></div>
+        </div>
+
+        <div class="meta-section">
+          <h2>Documenti caricati e dati OCR simulati</h2>
+          <div id="uploads" class="upload-list empty-state">Nessun documento caricato per questo servizio.</div>
+        </div>
+      </div>
+    </section>
+  </main>
 
 <script>
+const servicesSelect = document.getElementById('services');
+const serviceMeta = document.getElementById('serviceMeta');
+const serviceDescription = document.getElementById('serviceDescription');
+const documentsContainer = document.getElementById('documents');
+const integrationsContainer = document.getElementById('integrations');
+const uploadsContainer = document.getElementById('uploads');
+
+let currentVariantId = null;
+let cachedDetail = null;
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Errore HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 async function loadServices() {
-    const res = await fetch('/api/services')
-    const data = await res.json()
-
-    const select = document.getElementById('services')
-
-    data.forEach(s => {
-        const opt = document.createElement('option')
-        opt.value = s.variant_id
-        opt.text = s.service_name + " - " + s.variant_name
-        select.appendChild(opt)
-    })
-
-    select.onchange = () => loadDetail(select.value)
+  try {
+    const services = await fetchJson('/api/services');
+    servicesSelect.innerHTML = '<option value="">Seleziona un servizio</option>';
+    services.forEach(service => {
+      const option = document.createElement('option');
+      option.value = service.variant_id;
+      option.textContent = `${service.category_name} — ${service.variant_name}`;
+      servicesSelect.appendChild(option);
+    });
+  } catch (error) {
+    servicesSelect.innerHTML = '<option value="">Errore caricamento servizi</option>';
+    console.error(error);
+  }
 }
 
-async function loadDetail(id) {
-    const res = await fetch(`/api/services/${id}`)
-    const data = await res.json()
-
-    const container = document.getElementById('documents')
-    container.innerHTML = ""
-
-    data.documents.forEach(doc => {
-        const div = document.createElement('div')
-
-        div.innerHTML = `
-            <p>${doc.name}</p>
-            <input type="file" onchange="uploadFile(event, '${doc.code}')"/>
-        `
-
-        container.appendChild(div)
-    })
+function renderIntegrations(integrations) {
+  if (!integrations?.length) {
+    integrationsContainer.innerHTML = '<div class="empty-state">Nessuna integrazione censita per questa variante.</div>';
+    return;
+  }
+  integrationsContainer.innerHTML = integrations.map(item => `
+    <article class="integration-item">
+      <div>
+        <div class="integration-title">${escapeHtml(item.portal_name)}</div>
+        <div class="integration-scope">${escapeHtml(item.service_scope || 'Canale operativo')}</div>
+      </div>
+      <div class="integration-badges">
+        <span class="badge badge-automation">${escapeHtml(item.automation_level)}</span>
+        <span class="badge badge-mode">${escapeHtml(item.submission_mode)}</span>
+      </div>
+    </article>
+  `).join('');
 }
 
-async function uploadFile(event, type) {
-    const file = event.target.files[0]
-    const formData = new FormData()
+function renderUploads(uploads) {
+  if (!uploads?.length) {
+    uploadsContainer.className = 'upload-list empty-state';
+    uploadsContainer.innerHTML = 'Nessun documento caricato per questo servizio.';
+    return;
+  }
+  uploadsContainer.className = 'upload-list';
+  uploadsContainer.innerHTML = uploads.map(upload => {
+    const ocr = upload.ocr_payload || {};
+    const details = Object.entries(ocr)
+      .filter(([key]) => !['document_type', 'confidence'].includes(key))
+      .map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(Array.isArray(value) ? value.join(', ') : value)}</li>`)
+      .join('');
 
-    formData.append("file", file)
-    formData.append("document_type", type)
-
-    await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-    })
-
-    alert("Caricato")
+    return `
+      <article class="upload-item">
+        <div class="upload-header">
+          <div>
+            <div class="upload-title">${escapeHtml(upload.document_name || upload.document_code)}</div>
+            <div class="upload-subtitle">${escapeHtml(upload.original_filename)}</div>
+          </div>
+          <span class="badge badge-success">${escapeHtml(upload.ocr_status)}</span>
+        </div>
+        <div class="ocr-panel">
+          <div class="ocr-title">Anteprima OCR simulata</div>
+          <ul>${details || '<li>Nessun dato simulato disponibile.</li>'}</ul>
+        </div>
+      </article>
+    `;
+  }).join('');
 }
 
-loadServices()
+function renderDocuments(documents) {
+  if (!documents?.length) {
+    documentsContainer.innerHTML = '<div class="empty-state">Nessun requisito documentale disponibile.</div>';
+    return;
+  }
+
+  documentsContainer.innerHTML = documents.map(doc => `
+    <article class="document-item" data-document-code="${escapeHtml(doc.code)}">
+      <div class="document-main">
+        <div class="document-title-row">
+          <div class="document-title">${escapeHtml(doc.name)}</div>
+          <span class="badge badge-neutral">${escapeHtml(doc.mode)}</span>
+        </div>
+        <div class="document-note">${escapeHtml(doc.notes || 'Documento richiesto dal flusso della pratica.')}</div>
+        <div class="upload-actions">
+          <label class="upload-button">
+            Carica file
+            <input type="file" data-document-code="${escapeHtml(doc.code)}" data-document-name="${escapeHtml(doc.name)}" />
+          </label>
+          <span class="inline-status" id="status-${escapeHtml(doc.code)}">Non caricato</span>
+        </div>
+      </div>
+    </article>
+  `).join('');
+
+  documentsContainer.querySelectorAll('input[type="file"]').forEach(input => {
+    input.addEventListener('change', handleUpload);
+  });
+}
+
+async function loadServiceDetail(variantId) {
+  if (!variantId) {
+    serviceMeta.classList.add('hidden');
+    currentVariantId = null;
+    cachedDetail = null;
+    return;
+  }
+
+  try {
+    const detail = await fetchJson(`/api/services/${variantId}`);
+    currentVariantId = variantId;
+    cachedDetail = detail;
+    serviceMeta.classList.remove('hidden');
+    serviceDescription.textContent = detail.service.description;
+    renderDocuments(detail.documents);
+    renderIntegrations(detail.integrations);
+    renderUploads(detail.uploads);
+  } catch (error) {
+    console.error(error);
+    serviceDescription.textContent = 'Errore nel caricamento del dettaglio servizio.';
+  }
+}
+
+async function handleUpload(event) {
+  const input = event.target;
+  const file = input.files?.[0];
+  if (!file || !currentVariantId) return;
+
+  const documentCode = input.dataset.documentCode;
+  const documentName = input.dataset.documentName;
+  const statusNode = document.getElementById(`status-${documentCode}`);
+  statusNode.textContent = 'Caricamento...';
+  statusNode.className = 'inline-status is-loading';
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('variant_id', currentVariantId);
+  formData.append('document_code', documentCode);
+  formData.append('document_name', documentName);
+
+  try {
+    await fetchJson('/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    statusNode.textContent = 'Caricato';
+    statusNode.className = 'inline-status is-success';
+    await loadServiceDetail(currentVariantId);
+  } catch (error) {
+    console.error(error);
+    statusNode.textContent = 'Errore upload';
+    statusNode.className = 'inline-status is-error';
+  }
+}
+
+servicesSelect.addEventListener('change', (event) => loadServiceDetail(event.target.value));
+loadServices();
 </script>
-
 </body>
 </html>
