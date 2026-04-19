@@ -62,7 +62,23 @@ select {
 .upload-btn { background: #111827; color: #fff; position: relative; overflow: hidden; }
 .upload-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .privacy-box {
-    display: flex; align-items: flex-start; gap: 10px; color: #374151; font-size: 14px; line-height: 1.5; margin-bottom: 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    color: #374151;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 14px;
+}
+
+.privacy-box input[type="checkbox"] {
+    appearance: auto;
+    -webkit-appearance: checkbox;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    flex: 0 0 18px;
+    accent-color: #4f46e5;
 }
 .user-chip { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
 .user-avatar {
