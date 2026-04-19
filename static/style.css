@@ -76,8 +76,8 @@ select {
     -webkit-appearance: checkbox;
     width: 18px;
     height: 18px;
-    margin-top: 2px;
-    flex: 0 0 18px;
+    border: 1px solid #111827;
+    background: white;
     accent-color: #4f46e5;
 }
 .user-chip { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
