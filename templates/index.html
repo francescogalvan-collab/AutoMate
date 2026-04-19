@@ -16,11 +16,11 @@
       </div>
       <div class="auth-panel">
         <div id="loggedOutBox">
-          <label class="privacy-box">
-            <input type="checkbox" id="privacyConsent">
-            <span>Ho letto e accetto l’informativa privacy per il trattamento dei miei dati e dei documenti caricati.</span>
-          </label>
-          <button class="primary-btn" id="googleLoginBtn">Continua con Google</button>
+          <div class="privacy-box">
+  Registrandomi alla piattaforma dichiaro di aver letto e accetto l’informativa privacy per il trattamento dei miei dati e dei documenti caricati.
+</div>
+
+<button class="primary-btn" id="googleLoginBtn">Continua con Google</button>
         </div>
         <div id="loggedInBox" class="hidden">
           <div class="user-chip">
@@ -122,11 +122,22 @@ function syncCreatePracticeButton() {
 }
 
 async function startGoogleLogin() {
-  const privacyAccepted = document.getElementById('privacyConsent').checked;
-  if (!privacyAccepted) {
-    alert('Per procedere devi accettare l’informativa privacy.');
+  const res = await fetch('/auth/google/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ privacy_accepted: true })
+  });
+
+  if (res.redirected) {
+    window.location.href = res.url;
     return;
   }
+
+  const text = await res.text();
+  document.open();
+  document.write(text);
+  document.close();
+}
   const res = await fetch('/auth/google/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
